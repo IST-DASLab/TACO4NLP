@@ -1,0 +1,14 @@
+FastOBCPrunerForSeq2SeqLM:
+  sparsity_distribution: uniform
+  sparsity_type: unstructured
+  is_module_pruner: true
+  target_modules: .*\.(q|k|v|o|wi|wo)$
+  prune_biases: false
+  sequential: true
+  block_size: 128
+  damp: 1.0
+  encoder_blocks: encoder.block
+  pre_encoder_modules: ['shared']
+  post_encoder_modules: ['encoder.final_layer_norm', 'encoder.dropout']
+  decoder_blocks: decoder.block
+  pre_decoder_modules: ['decoder.embed_tokens']

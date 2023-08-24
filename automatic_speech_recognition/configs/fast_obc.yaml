@@ -1,0 +1,13 @@
+FastOBCPrunerForSeq2SeqLM:
+  sparsity_distribution: uniform
+  sparsity_type: unstructured
+  is_module_pruner: true
+  target_modules: (\.(q|k|v|out)_proj|fc\d+)
+  prune_biases: false
+  sequential: true
+  block_size: 128
+  damp: 1.0
+  encoder_blocks: model.encoder.layers
+  pre_encoder_modules: ['model.encoder.conv1', 'model.encoder.conv2', 'model.encoder.embed_positions']
+  post_encoder_modules: ['model.encoder.layer_norm']
+  decoder_blocks: model.decoder.layers
