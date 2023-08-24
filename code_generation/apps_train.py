@@ -147,6 +147,9 @@ def parse_args():
     parser.add_argument(
         "--cycle_steps", type=int, default=None, help="Number of steps in cycles for cyclic linear scheduler."
     )
+    parser.add_argument(
+        "--cycle_epochs", type=int, default=None, help="Number of epochs in cycles for cyclic linear scheduler."
+    )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
     parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
     parser.add_argument(

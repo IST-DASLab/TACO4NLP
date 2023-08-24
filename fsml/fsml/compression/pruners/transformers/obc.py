@@ -136,7 +136,12 @@ class BaseOBCPrunerForAnyLM(BaseOBCPruner):
                 if isinstance(out, (list, tuple)):
                     out = out[0]
                 # change only first input argument
-                inp_args[0].data = out
+                if len(inp_args) > 0:
+                    inp_args[0].data = out
+                elif 'hidden_states' in inp_kwargs:
+                    inp_kwargs['hidden_states'] = out
+                else:
+                    raise ValueError("Unsupported block input format.")
 
             if self.cpu_offload:
                 block = block.cpu()
@@ -240,7 +245,12 @@ class BaseOBCPrunerForAnyLM(BaseOBCPruner):
                     if isinstance(out, (list, tuple)):
                         out = out[0]
                     # change only first input argument
-                    inp_args[0].data = out
+                    if len(inp_args) > 0:
+                        inp_args[0].data = out
+                    elif 'hidden_states' in inp_kwargs:
+                        inp_kwargs['hidden_states'] = out
+                    else:
+                        raise ValueError("Unsupported block input format.")
 
                 if self.cpu_offload:
                     block = block.cpu()

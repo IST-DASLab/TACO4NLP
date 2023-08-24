@@ -997,7 +997,7 @@ def main():
                             x_teacher = x_teacher[0]
                             x_student = x_student[0]
                         # get corresponding mask
-                        mask = encoder_mask if 'encoder' in feat_name else decoder_mask
+                        mask = encoder_mask if re.search('(encoder|EncDecAttention.(k|v))', feat_name) else decoder_mask
                         # option 1 - MSE
                         if args.feat_loss == 'l2':
                             feat_loss += F.mse_loss(x_student * mask, x_teacher * mask) / mask.numel()
