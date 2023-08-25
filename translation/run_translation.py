@@ -58,8 +58,7 @@ from transformers import (
 
 from transformers.utils.versions import require_version
 # import fsml
-# sys.path.append(os.path.join(os.pardir, 'fsml'))
-sys.path.append(os.path.join('/nfs/scistore14/alistgrp/dkuznede/TACO4NLP', 'fsml'))
+sys.path.append(os.path.join(os.pardir, 'fsml'))
 from fsml.compression import create_pruner_from_config
 from fsml.schedules import SparsitySchedule, CyclicLinearLR
 from fsml.optim import wrap_optimizer

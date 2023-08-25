@@ -1191,7 +1191,6 @@ def main():
                         student_features
                     )
 
-
             outputs = model(**batch)
             orig_loss = outputs.loss
             loss = args.orig_loss_weight * orig_loss
@@ -1218,7 +1217,7 @@ def main():
                         mask = torch.ones_like(x_teacher) if 'encoder' in feat_name else decoder_mask
                         # option 1 - MSE
                         if args.feat_loss == 'l2':
-                            feat_loss += F.mse_loss(x_student * mask, x_teacher * mask) / mask.numel()
+                            feat_loss += F.mse_loss(x_student * mask, x_teacher * mask)
                         # option 2 - normalized MSE
                         else:
                             feat_loss += masked_norm_mse(x_student, x_teacher, mask)
