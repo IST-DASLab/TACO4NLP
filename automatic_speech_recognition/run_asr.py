@@ -538,6 +538,12 @@ def parse_args():
         help="Weight of the output distillation loss in total loss."
     )
     parser.add_argument(
+        "--teacher_model_name_or_path",
+        default=None,
+        type=str,
+        help="Path or name of teacher model.",
+    )
+    parser.add_argument(
         '--feat_loss_weight',
         default=0.0,
         type=float,
@@ -624,7 +630,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         return batch
 
 
-def masked_norm_mse(x1, x2, mask, eps=1e-9):
+def masked_norm_mse(x1, x2, mask, eps=1e-8):
     return (mask * (x1 - x2) ** 2).mean() / ((mask * x2 ** 2).mean() + eps)
 
 
@@ -819,20 +825,6 @@ def main():
     # 8. Load Metric
     metric = evaluate.load("wer")
 
-    def compute_metrics(pred):
-        accelerator.print('Wham!')
-        pred_ids = pred.predictions
-
-        pred.label_ids[pred.label_ids == -100] = tokenizer.pad_token_id
-
-        pred_str = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
-        # we do not want to group tokens when computing the metrics
-        label_str = tokenizer.batch_decode(pred.label_ids, skip_special_tokens=True)
-
-        wer = metric.compute(predictions=pred_str, references=label_str)
-
-        return {"wer": wer}
-
     # 9. Create a single speech processor
     # make sure all processes wait until data is saved
     with accelerator.main_process_first():
@@ -968,7 +960,15 @@ def main():
     # prepare teacher (if using distillation) # TODO try stronger model?
     feat_distillation = False
     if args.distillation:
-        teacher_model = deepcopy(model)
+        if args.teacher_model_name_or_path:
+            teacher_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                args.teacher_model_name_or_path,
+                config=config,
+                cache_dir=args.cache_dir,
+            )
+        else:
+            teacher_model = deepcopy(model)
+
         if args.feat_loss_weight > 0:
             feat_distillation = True
 
@@ -1217,7 +1217,7 @@ def main():
                         mask = torch.ones_like(x_teacher) if 'encoder' in feat_name else decoder_mask
                         # option 1 - MSE
                         if args.feat_loss == 'l2':
-                            feat_loss += F.mse_loss(x_student * mask, x_teacher * mask)
+                            feat_loss += F.mse_loss(x_student * mask, x_teacher * mask) / mask.float().mean()
                         # option 2 - normalized MSE
                         else:
                             feat_loss += masked_norm_mse(x_student, x_teacher, mask)

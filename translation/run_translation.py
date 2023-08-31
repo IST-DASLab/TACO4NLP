@@ -417,6 +417,12 @@ def parse_args():
         help="Weight of the feature distillation loss in total loss."
     )
     parser.add_argument(
+        "--teacher_model_name_or_path",
+        default=None,
+        type=str,
+        help="Path or name of teacher model.",
+    )
+    parser.add_argument(
         '--feat_names',
         default='',
         type=str,
@@ -428,6 +434,11 @@ def parse_args():
         type=str,
         choices=['l2', 'l2_norm'],
         help="Loss type."
+    )
+    parser.add_argument(
+        '--reset_optimizer',
+        action="store_true",
+        help="Whether to reset optimizer on pruning step.",
     )
 
     args = parser.parse_args()
@@ -467,6 +478,20 @@ class AverageMeter:
     
 def masked_norm_mse(x1, x2, mask, eps=1e-9):
     return (mask * (x1 - x2) ** 2).mean() / ((mask * x2 ** 2).mean() + eps)
+
+
+def reset_optimizer_buffers(optimizer):
+    for param_group in optimizer.param_groups:
+        for param in param_group['params']:
+            state = optimizer.state[param]
+            if "momentum_buffer" in state:
+                state["momentum_buffer"].zero_()
+            if 'exp_avg' in state:
+                state['exp_avg'].zero_()
+            if 'exp_avg_sq' in state:
+                state['exp_avg_sq'].zero_()
+            if 'max_exp_avg_sq' in state:
+                state['max_exp_avg_sq'].zero_()
 
 
 def main():
@@ -744,7 +769,16 @@ def main():
     # prepare teacher (if using distillation) # TODO try stronger model?
     feat_distillation = False
     if args.distillation:
-        teacher_model = deepcopy(model)
+        if args.teacher_model_name_or_path:
+            teacher_model = AutoModelForSeq2SeqLM.from_pretrained(
+                args.teacher_model_name_or_path,
+                from_tf=bool(".ckpt" in args.teacher_model_name_or_path),
+                config=config,
+                trust_remote_code=args.trust_remote_code,
+            )
+        else:
+            teacher_model = deepcopy(model)
+            
         if args.feat_loss_weight > 0:
             feat_distillation = True
 
@@ -958,6 +992,9 @@ def main():
                 # remove hooks before pruning
                 if feat_distillation:
                     remove_hooks(student_hooks)
+                # reset optimizer buffers
+                if args.reset_optimizer:
+                    reset_optimizer_buffers(optimizer)
                 if accelerator.is_main_process:
                     pruner.prune(sparsity)
                 # synchronize masks across workers
@@ -999,7 +1036,7 @@ def main():
                         mask = encoder_mask if re.search('(encoder|EncDecAttention.(k|v))', feat_name) else decoder_mask
                         # option 1 - MSE
                         if args.feat_loss == 'l2':
-                            feat_loss += F.mse_loss(x_student * mask, x_teacher * mask) / mask.numel()
+                            feat_loss += F.mse_loss(x_student * mask, x_teacher * mask) / mask.float().mean()
                         # option 2 - normalized MSE
                         else:
                             feat_loss += masked_norm_mse(x_student, x_teacher, mask)
