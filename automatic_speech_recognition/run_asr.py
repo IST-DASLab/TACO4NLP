@@ -59,7 +59,7 @@ from transformers.trainer_pt_utils import LengthGroupedSampler
 
 # import fsml
 sys.path.append(os.path.join(os.pardir, 'fsml'))
-from fsml.compression import create_pruner_from_config
+from fsml.compression import create_pruners_from_yaml
 from fsml.schedules import SparsitySchedule, CyclicLinearLR
 from fsml.optim import wrap_optimizer
 
@@ -562,6 +562,12 @@ def parse_args():
         choices=['l2', 'l2_norm'],
         help="Loss type."
     )
+    parser.add_argument(
+        '--temperature',
+        default=1.0,
+        type=float,
+        help="Distillation temperature."
+    )
 
     args = parser.parse_args()
 
@@ -628,6 +634,16 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         batch["labels"] = labels
 
         return batch
+
+
+def masked_kl_div(student_logits, teacher_logits, mask, temp):
+    num_tokens = mask.sum().item() / mask.size(-1)
+    return (temp ** 2 / num_tokens) * F.kl_div(
+        input=mask * F.log_softmax(student_logits / temp, dim=-1),
+        target=mask * F.log_softmax(teacher_logits / temp, dim=-1),
+        log_target=True,
+        reduction="sum",
+    )
 
 
 def masked_norm_mse(x1, x2, mask, eps=1e-8):
@@ -1005,7 +1021,7 @@ def main():
     # create pruner
     pruner = None
     if args.sparsification_config:
-        pruner = create_pruner_from_config(
+        pruners = create_pruners_from_yaml(
             accelerator.unwrap_model(model), 
             args.sparsification_config, 
             pruner_kwargs
@@ -1019,7 +1035,7 @@ def main():
             args.sparsity_inter_func
         )
         # prepare optimizer
-        optimizer = wrap_optimizer(optimizer, pruner)
+        optimizer = wrap_optimizer(optimizer, pruners)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
@@ -1178,11 +1194,12 @@ def main():
                 # remove hooks before pruning
                 if feat_distillation:
                     remove_hooks(student_hooks)
-                if accelerator.is_main_process:
-                    pruner.prune(sparsity)
-                # synchronize masks across workers
-                broadcast(pruner.params)
-                broadcast(pruner.param_masks)
+                for pruner in pruners:
+                    if accelerator.is_main_process:
+                        pruner.prune(sparsity)
+                    # synchronize masks across workers
+                    broadcast(pruner.params)
+                    broadcast(pruner.param_masks)
                 # re-enable hooks after pruning
                 if feat_distillation:
                     student_hooks = register_cache_output_hooks(
@@ -1193,20 +1210,23 @@ def main():
 
             outputs = model(**batch)
             orig_loss = outputs.loss
-            loss = args.orig_loss_weight * orig_loss
+            # set defaults
+            dist_loss = torch.zeros_like(orig_loss)
+            feat_loss = torch.zeros_like(orig_loss)
             # add other losses
             if args.distillation:
                 # make teacher forward pass
                 with torch.no_grad():
                     teacher_outputs = teacher_model(**batch)
                 decoder_mask = batch['labels'].ne(-100).unsqueeze(-1)
-                dist_loss = F.cross_entropy(
-                    decoder_mask * outputs.logits, 
-                    decoder_mask * teacher_outputs.logits.softmax(dim=-1)
+                dist_loss = masked_kl_div(
+                    outputs.logits, 
+                    teacher_outputs.logits,
+                    decoder_mask,
+                    temp=args.temperature
                 )
-                loss += args.dist_loss_weight * dist_loss
                 if args.feat_loss_weight > 0:
-                    feat_loss = 0
+                    num_features = len(teacher_features)
                     for feat_name in teacher_features:
                         x_teacher = teacher_features[feat_name]
                         x_student = student_features[feat_name]
@@ -1221,7 +1241,8 @@ def main():
                         # option 2 - normalized MSE
                         else:
                             feat_loss += masked_norm_mse(x_student, x_teacher, mask)
-                    loss += args.feat_loss_weight * feat_loss
+
+            loss = args.orig_loss_weight * orig_loss + args.dist_loss_weight * dist_loss + args.feat_loss_weight * feat_loss
 
             if args.with_tracking:
                 loss_m.update(loss.item())
