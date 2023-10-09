@@ -453,6 +453,12 @@ def parse_args():
         action="store_true",
         help="Whether to reset optimizer on pruning step.",
     )
+    parser.add_argument(
+        "--freeze_modules",
+        default=None,
+        type=str,
+        help="Modules to freeze.",
+    )
 
     args = parser.parse_args()
 
@@ -714,16 +720,45 @@ def main():
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
     no_decay = ["bias", "LayerNorm.weight", "layer_norm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
-        },
-        {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-            "weight_decay": 0.0,
-        },
-    ]
+    if args.freeze_modules:
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p for n, p in model.named_parameters() 
+                    if not any(nd in n for nd in no_decay) 
+                    and not re.search(n, args.freeze_modules)
+                ],
+                "weight_decay": args.weight_decay,
+            },
+            {
+                "params": [
+                    p for n, p in model.named_parameters() 
+                    if any(nd in n for nd in no_decay)
+                    and not re.search(n, args.freeze_modules)
+                ],
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [
+                    p for n, p in model.named_parameters() 
+                    if re.search(n, args.freeze_modules)
+                ],
+                "lr": 0.0,
+                "weight_decay": 0.0,
+            },
+        ]
+    else:
+        optimizer_grouped_parameters = [
+            {
+                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "weight_decay": args.weight_decay,
+            },
+            {
+                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                "weight_decay": 0.0,
+            },
+        ]
+
     optimizer = torch.optim.AdamW(
         optimizer_grouped_parameters, 
         lr=args.learning_rate,
